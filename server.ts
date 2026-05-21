@@ -3,6 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import multer from "multer";
+import { PDFParse } from "pdf-parse";
 
 dotenv.config();
 
@@ -135,6 +137,145 @@ app.post("/api/index-document", async (req, res) => {
   } catch (error: any) {
     console.error("Indexing failed:", error);
     res.status(500).json({ success: false, message: error.message || "Unknown error during indexing" });
+  }
+});
+
+// Configure Multer for processing file uploads in memory safely
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 30 * 1024 * 1024, // 30 MB size limit
+  },
+});
+
+// 4b. API: Upload and Index Document (Text or PDF formats)
+app.post("/api/upload-file", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, message: "No file was uploaded." });
+    }
+
+    const documentName = file.originalname;
+    const extension = documentName.split(".").pop()?.toLowerCase();
+
+    console.log(`Received file "${documentName}" of type "${file.mimetype}", size: ${file.size} bytes`);
+    let textContent = "";
+
+    if (extension === "pdf") {
+      try {
+        const parser = new PDFParse({ data: file.buffer });
+        const parsedPdf = await parser.getText();
+        textContent = parsedPdf.text;
+      } catch (pdfErr: any) {
+        console.error("PDF Parsing error:", pdfErr);
+        return res.status(400).json({
+          success: false,
+          message: `Failed to parse PDF file correctly. Ensure it is not password-protected. Details: ${pdfErr.message || pdfErr}`,
+        });
+      }
+    } else {
+      // Decode the buffer as standard UTF-8 string
+      textContent = file.buffer.toString("utf-8");
+    }
+
+    if (!textContent || textContent.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "The uploaded file does not contain any readable text or could not be parsed successfully.",
+      });
+    }
+
+    // Server-side chunker
+    const chunks: DocumentChunk[] = [];
+    const chunkSize = 500; // character block size
+    const overlap = 100;
+
+    let idx = 0;
+    let pageCount = 1;
+    let chunkCounter = 0;
+
+    // Split text content into paragraphs first to keep alignment, or standard substring chunker
+    const normalizedText = textContent.replace(/\r\n/g, "\n");
+    
+    while (idx < normalizedText.length) {
+      const textChunk = normalizedText.substring(idx, idx + chunkSize).trim();
+      if (textChunk.length > 20) {
+        chunks.push({
+          id: `file-chunk-${chunkCounter}`,
+          text: textChunk,
+          pageNumber: pageCount,
+        });
+        chunkCounter++;
+        // Roll page boundary every 2 chunks as a general layout approximation
+        if (chunkCounter % 2 === 0) {
+          pageCount++;
+        }
+      }
+      idx += (chunkSize - overlap);
+    }
+
+    if (chunks.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No indexable study fragments could be derived from this document.",
+      });
+    }
+
+    console.log(`Successfully parsed document. Total chunks generated: ${chunks.length}. Preparing vectorization...`);
+
+    // Reset session document
+    indexedChunks = [];
+    currentDocumentName = documentName;
+
+    const initializedChunks: DocumentChunk[] = [];
+
+    // Process chunk-by-chunk to acquire Gemini embeddings
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      try {
+        const embedResponse = await ai.models.embedContent({
+          model: "gemini-embedding-2-preview",
+          contents: chunk.text,
+        });
+
+        const embeddingsProp = (embedResponse as any).embeddings;
+        let embeddingValues: number[] | undefined = undefined;
+        if (embeddingsProp) {
+          if (Array.isArray(embeddingsProp)) {
+            embeddingValues = embeddingsProp[0]?.values;
+          } else {
+            embeddingValues = embeddingsProp.values;
+          }
+        }
+
+        if (embeddingValues) {
+          initializedChunks.push({
+            id: chunk.id,
+            text: chunk.text,
+            pageNumber: chunk.pageNumber,
+            embedding: embeddingValues,
+          });
+        }
+      } catch (err: any) {
+        console.error(`Error embedding file chunk index ${i}:`, err.message || err);
+      }
+    }
+
+    indexedChunks = initializedChunks;
+    console.log(`Vector indexing complete for uploaded file! Loaded chunks count: ${indexedChunks.length}`);
+
+    res.json({
+      success: true,
+      message: `Successfully indexed "${documentName}". Ready for reading!`,
+      chunkCount: indexedChunks.length,
+    });
+  } catch (error: any) {
+    console.error("File upload and indexing failed:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Unknown error occurred while processing and vector indexing this study file.",
+    });
   }
 });
 

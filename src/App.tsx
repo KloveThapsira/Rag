@@ -41,7 +41,6 @@ A Binary Search Tree, or BST, is a node-based binary tree data structure which h
 
 export default function App() {
   // Appearance & Accessibility States
-  const [fontSize, setFontSize] = useState<"medium" | "large" | "xl">("large");
   const [theme, setTheme] = useState<"midnight" | "warm">("midnight");
 
   // RAG States
@@ -49,7 +48,10 @@ export default function App() {
   const [documentName, setDocumentName] = useState<string>("");
   const [chunkCount, setChunkCount] = useState<number>(0);
   const [isIndexing, setIsIndexing] = useState<boolean>(false);
-  const [inputText, setInputText] = useState<string>("");
+  const [pastedText, setPastedText] = useState<string>("");
+  const [manualQuestionText, setManualQuestionText] = useState<string>("");
+  const [materialTab, setMaterialTab] = useState<"upload" | "paste">("upload");
+  const [isDragging, setIsDragging] = useState<boolean>(false);
 
   // Search Context Query States
   const [query, setQuery] = useState<string>("");
@@ -351,7 +353,7 @@ export default function App() {
   };
 
   const handleCustomTextInputIndex = async () => {
-    if (!inputText.trim()) {
+    if (!pastedText.trim()) {
       announceAcoustically("Please type or paste some text study material first.");
       return;
     }
@@ -363,7 +365,7 @@ export default function App() {
 
     // Local split
     const chunks: { id: string; text: string; pageNumber: number }[] = [];
-    const paragraphs = inputText.split("\n\n").filter(p => p.trim().length > 10);
+    const paragraphs = pastedText.split("\n\n").filter(p => p.trim().length > 10);
 
     paragraphs.forEach((p, idx) => {
       chunks.push({
@@ -388,12 +390,64 @@ export default function App() {
         setHasDocument(true);
         setDocumentName("Copy-Pasted Notes");
         setChunkCount(data.chunkCount);
-        setInputText("");
+        setPastedText("");
         playSystemChime("success");
         announceAcoustically(`Successfully loaded pasted notes! I have categorized ${data.chunkCount} search points. Ask your study questions.`);
       }
     } catch (err) {
       announceAcoustically("Failed to process your notes. Confirm API keys in secrets.");
+    } finally {
+      setIsIndexing(false);
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!file) return;
+
+    // Check if it's pdf or text-based
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    const isValidFile = file.type === "application/pdf" || 
+                        file.type.startsWith("text/") || 
+                        ["pdf", "txt", "md", "json", "csv", "xml", "yaml", "yml"].includes(extension || "");
+
+    if (!isValidFile) {
+      const errorMsg = "Unsupported file type. Please upload a PDF (.pdf) or standard text file.";
+      setFeedbackMsg(errorMsg);
+      announceAcoustically(errorMsg);
+      return;
+    }
+
+    stopSpeaking();
+    setIsIndexing(true);
+    setFeedbackMsg(`Uploading and indexing "${file.name}"...`);
+    announceAcoustically(`Uploading and vectorizing ${file.name}. Please wait.`);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/upload-file", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setHasDocument(true);
+        setDocumentName(file.name);
+        setChunkCount(data.chunkCount);
+        setFeedbackMsg(`Successfully uploaded and indexed "${file.name}"!`);
+        playSystemChime("success");
+        announceAcoustically(`Successfully processed ${file.name}. Spawning ${data.chunkCount} study fragments. Ask your questions now.`);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to index file.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      const errMsg = err.message || "Error indexing custom file.";
+      setFeedbackMsg(errMsg);
+      announceAcoustically(`Sorry, we encountered an error indexing your custom file: ${errMsg}`);
     } finally {
       setIsIndexing(false);
     }
@@ -460,10 +514,10 @@ export default function App() {
 
   // Dynamic style sizes based on large accessibility values
   const textStyles = {
-    title: fontSize === "medium" ? "text-xl md:text-2xl" : fontSize === "large" ? "text-2xl md:text-3xl" : "text-3xl md:text-4xl",
-    heading: fontSize === "medium" ? "text-lg font-semibold" : fontSize === "large" ? "text-xl font-bold" : "text-2xl font-extrabold",
-    body: fontSize === "medium" ? "text-sm" : fontSize === "large" ? "text-base" : "text-lg",
-    largeText: fontSize === "medium" ? "text-base font-semibold" : fontSize === "large" ? "text-lg font-bold" : "text-2xl font-extrabold"
+    title: "text-2xl md:text-3xl",
+    heading: "text-xl font-bold",
+    body: "text-base",
+    largeText: "text-lg font-bold"
   };
 
   return (
@@ -472,7 +526,7 @@ export default function App() {
         theme === "midnight" ? "bg-[#0F172A] text-slate-100" : "bg-orange-50/70 text-slate-900"
       }`}
       style={{
-        fontSize: fontSize === "medium" ? "15px" : fontSize === "large" ? "17px" : "19px"
+        fontSize: "17px"
       }}
     >
       {/* HEADER BAR FOR SLEEK INTERFACE */}
@@ -505,31 +559,6 @@ export default function App() {
           }`}>
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             <span className="uppercase tracking-wider">System Ready</span>
-          </div>
-
-          <div className="flex items-center bg-slate-800/40 p-1 rounded-xl border border-slate-700/80">
-            <span className="text-[11px] text-slate-400 mr-2 font-mono font-medium pl-2">Size:</span>
-            <button
-              onClick={() => setFontSize("medium")}
-              className={`px-2.5 py-0.5 rounded-lg text-xs transition font-semibold ${fontSize === "medium" ? "bg-amber-500 text-slate-950 font-black" : "text-slate-300 hover:bg-slate-700"}`}
-              aria-label="Set Medium Text Size"
-            >
-              AA
-            </button>
-            <button
-              onClick={() => setFontSize("large")}
-              className={`px-2.5 py-0.5 rounded-lg text-xs transition font-bold ${fontSize === "large" ? "bg-amber-500 text-slate-950 font-black" : "text-slate-300 hover:bg-slate-700"}`}
-              aria-label="Set Large Text Size"
-            >
-              AA
-            </button>
-            <button
-              onClick={() => setFontSize("xl")}
-              className={`px-2.5 py-0.5 rounded-lg text-xs transition font-extrabold ${fontSize === "xl" ? "bg-amber-500 text-slate-950 font-black" : "text-slate-300 hover:bg-slate-700"}`}
-              aria-label="Set Extra Large Text Size"
-            >
-              AA
-            </button>
           </div>
 
           {/* Contrast Theme Selector */}
@@ -589,79 +618,109 @@ export default function App() {
                   1. Study Material
                 </h2>
                 <p className={`text-xs ${theme === "midnight" ? "text-slate-400" : "text-slate-600"} mb-5`}>
-                  Select a preloaded school study guide to index it with real-time vector embeddings, or paste custom notes.
+                  Upload any text-based study file or paste custom notes directly to index it in real-time.
                 </p>
- 
-                {/* Pre-made Guide Cards */}
-                <div className="space-y-3 mb-6">
+
+                {/* Tab selectors for custom styled segmented tabs */}
+                <div className="flex border-b border-slate-800/80 mb-5 text-xs font-bold">
                   <button
-                    onClick={() => loadPreloadedGuide("biology")}
-                    disabled={isIndexing}
-                    className={`w-full text-left p-4 rounded-xl border transition-all ${
-                      documentName.includes("Biology")
-                        ? "bg-amber-500/10 border-amber-500/60 text-amber-400"
-                        : theme === "midnight"
-                        ? "bg-slate-800/30 border-slate-800 hover:border-slate-700 hover:bg-slate-800/50 text-slate-300"
-                        : "bg-slate-50 border-slate-200 hover:border-slate-300 hover:bg-slate-100 text-slate-700"
+                    onClick={() => setMaterialTab("upload")}
+                    className={`flex-1 pb-2 border-b-2 transition ${
+                      materialTab === "upload"
+                        ? "border-amber-500 text-amber-400"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
                     }`}
                   >
-                    <span className="block font-bold text-sm">🎒 Biology Notes</span>
-                    <span className="text-[11px] text-slate-400 block mt-1">Photosynthesis & Cell Respiration</span>
+                    Upload File
                   </button>
- 
                   <button
-                    onClick={() => loadPreloadedGuide("history")}
-                    disabled={isIndexing}
-                    className={`w-full text-left p-4 rounded-xl border transition-all ${
-                      documentName.includes("History")
-                        ? "bg-amber-500/10 border-amber-500/60 text-amber-400"
-                        : theme === "midnight"
-                        ? "bg-slate-800/30 border-slate-800 hover:border-slate-700 hover:bg-slate-800/50 text-slate-300"
-                        : "bg-slate-50 border-slate-200 hover:border-slate-300 hover:bg-slate-100 text-slate-700"
+                    onClick={() => setMaterialTab("paste")}
+                    className={`flex-1 pb-2 border-b-2 transition ${
+                      materialTab === "paste"
+                        ? "border-amber-500 text-amber-400"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
                     }`}
                   >
-                    <span className="block font-bold text-sm">📜 World History Notes</span>
-                    <span className="text-[11px] text-slate-400 block mt-1">Great British Industrial Revolution</span>
-                  </button>
- 
-                  <button
-                    onClick={() => loadPreloadedGuide("compSci")}
-                    disabled={isIndexing}
-                    className={`w-full text-left p-4 rounded-xl border transition-all ${
-                      documentName.includes("Databases")
-                        ? "bg-amber-500/10 border-amber-500/60 text-amber-400"
-                        : theme === "midnight"
-                        ? "bg-slate-800/30 border-slate-800 hover:border-slate-700 hover:bg-slate-800/50 text-slate-300"
-                        : "bg-slate-50 border-slate-200 hover:border-slate-300 hover:bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    <span className="block font-bold text-sm">💻 Computer Science</span>
-                    <span className="text-[11px] text-slate-400 block mt-1">Databases & Search Tree Structures</span>
+                    Paste Notes
                   </button>
                 </div>
- 
-                {/* CUSTOM PASTE AREA */}
-                <div className="space-y-2 mt-4">
-                  <span className="text-xs font-mono text-slate-400 block">Or paste custom text notes:</span>
-                  <textarea
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    placeholder="Enter customized note paragraphs here..."
-                    className={`w-full text-xs p-3 h-28 border rounded-xl outline-none transition-all ${
-                      theme === "midnight"
-                        ? "bg-slate-950/70 border-slate-800 focus:border-slate-700 text-slate-200"
-                        : "bg-white border-slate-300 focus:border-slate-400 text-slate-900"
-                    }`}
-                  />
-                  <button
-                    onClick={handleCustomTextInputIndex}
-                    disabled={isIndexing}
-                    className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs py-2.5 rounded-lg border border-slate-700 transition flex items-center justify-center gap-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    Index Pasted Notes
-                  </button>
-                </div>
+
+                {materialTab === "upload" && (
+                  <div className="space-y-4 mb-4">
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsDragging(true);
+                      }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                          handleFileUpload(e.dataTransfer.files[0]);
+                        }
+                      }}
+                      onClick={() => document.getElementById("study-file-input")?.click()}
+                      className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${
+                        isDragging
+                          ? "border-amber-500 bg-amber-500/10 scale-[1.02]"
+                          : theme === "midnight"
+                          ? "border-slate-800 hover:border-slate-700 bg-slate-950/40 hover:bg-slate-950/70"
+                          : "border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100"
+                      }`}
+                    >
+                      <input
+                        id="study-file-input"
+                        type="file"
+                        accept=".pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            handleFileUpload(e.target.files[0]);
+                          }
+                        }}
+                        className="hidden"
+                      />
+                      <div className="w-10 h-10 bg-slate-800/60 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <Upload className="w-5 h-5 text-amber-400" />
+                      </div>
+                      <span className="block text-xs font-bold text-slate-200">
+                        Drag & drop study file here
+                      </span>
+                      <span className="block text-[11px] text-slate-400 mt-1">
+                        or click to browse from device
+                      </span>
+                    </div>
+                    <div className="text-[10px] leading-relaxed text-slate-400 space-y-1 bg-slate-950/40 p-3 rounded-xl border border-slate-800/80">
+                      <p>✨ <strong>Supported types</strong>: .pdf, .txt, .md, .json, .csv, .xml, .yaml</p>
+                      <p>💡 <strong>Note</strong>: High-fidelity PDFs are processed and split into interactive vectors instantly for vocal reading!</p>
+                    </div>
+                  </div>
+                )}
+
+                {materialTab === "paste" && (
+                  /* CUSTOM PASTE AREA */
+                  <div className="space-y-2 mb-4">
+                    <span className="text-xs font-mono text-slate-400 block">Or paste custom text notes:</span>
+                    <textarea
+                      value={pastedText}
+                      onChange={(e) => setPastedText(e.target.value)}
+                      placeholder="Enter customized note paragraphs here..."
+                      className={`w-full text-xs p-3 h-28 border rounded-xl outline-none transition-all ${
+                        theme === "midnight"
+                          ? "bg-slate-950/70 border-slate-800 focus:border-slate-700 text-slate-200"
+                          : "bg-white border-slate-300 focus:border-slate-400 text-slate-900"
+                      }`}
+                    />
+                    <button
+                      onClick={handleCustomTextInputIndex}
+                      disabled={isIndexing}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs py-2.5 rounded-lg border border-slate-700 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      Index Pasted Notes
+                    </button>
+                  </div>
+                )}
  
                 {/* DB CLEANSE */}
                 {hasDocument && (
@@ -674,35 +733,7 @@ export default function App() {
                 )}
               </div>
  
-              {/* AUDIT STATUS BOX */}
-              <div
-                className={`p-6 rounded-2xl border ${
-                  theme === "midnight" ? "bg-[#0B1120] border-slate-800" : "bg-white border-slate-200 shadow-sm"
-                }`}
-              >
-                <h3 className="text-xs font-mono text-slate-400 uppercase tracking-widest mb-3">RAG Pipeline Metrics:</h3>
-                {hasDocument ? (
-                  <div className="space-y-2.5 text-xs text-slate-300">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Indexed Document:</span>
-                      <span className="font-bold text-slate-100">{documentName}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Database Chunks:</span>
-                      <span className="font-mono text-amber-400 font-extrabold">{chunkCount} blocks</span>
-                    </div>
-                    <div className="flex justify-between border-t border-slate-800 pt-2 text-[11px]">
-                      <span className="text-slate-400">Vector Model:</span>
-                      <span className="text-slate-400">Google Gemini Embeds</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-xs text-slate-500">
-                    <AlertCircle className="w-4 h-4" />
-                    <span>No study guide vector index initialized.</span>
-                  </div>
-                )}
-              </div>
+
             </div>
 
             {/* RIGHT MAIN VOICE INTERACTIVE PORTAL */}
@@ -726,23 +757,15 @@ export default function App() {
                 </div>
  
                 {!hasDocument ? (
-                  <div className="text-center py-16 space-y-6">
+                  <div className="text-center py-16 space-y-6 animate-pulse">
                     <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto text-amber-500 mb-2">
                       <BookOpen className="w-10 h-10" />
                     </div>
                     <div className="space-y-2">
                       <h3 className={`${textStyles.heading} font-sans`}>Assistant is waiting for materials...</h3>
                       <p className={`text-slate-400 text-sm max-w-md mx-auto ${textStyles.body}`}>
-                        Select any of the 🎒 **Biology, History, or Science Study Guides** on the left menu. The system will slice and index them, allowing you to ask questions using the vocal mic.
+                        Upload a text-based study file or paste your custom notes on the left panel to initialize your active vocal search workspace.
                       </p>
-                    </div>
-                    <div>
-                      <button
-                        onClick={() => loadPreloadedGuide("biology")}
-                        className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-6 py-3 rounded-2xl tracking-wide shadow-lg shadow-amber-500/10 text-sm transition-all cursor-pointer font-display"
-                      >
-                        🚀 Load Biology Study Guide Now
-                      </button>
                     </div>
                   </div>
                 ) : (
@@ -801,13 +824,13 @@ export default function App() {
                       <div className="flex gap-2">
                         <input
                           type="text"
-                          value={inputText}
-                          onChange={(e) => setInputText(e.target.value)}
+                          value={manualQuestionText}
+                          onChange={(e) => setManualQuestionText(e.target.value)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
-                              setQuery(inputText);
-                              handleQuerySearch(inputText);
-                              setInputText("");
+                              setQuery(manualQuestionText);
+                              handleQuerySearch(manualQuestionText);
+                              setManualQuestionText("");
                             }
                           }}
                           placeholder="What would you like to understand about this chapter?"
@@ -819,10 +842,10 @@ export default function App() {
                         />
                         <button
                           onClick={() => {
-                            if (inputText.trim()) {
-                              setQuery(inputText);
-                              handleQuerySearch(inputText);
-                              setInputText("");
+                            if (manualQuestionText.trim()) {
+                              setQuery(manualQuestionText);
+                              handleQuerySearch(manualQuestionText);
+                              setManualQuestionText("");
                             }
                           }}
                           disabled={isQuerying}
@@ -944,12 +967,12 @@ export default function App() {
         theme === "midnight" ? "bg-[#0B1120] border-slate-800 text-slate-400" : "bg-white border-slate-200 text-slate-600"
       }`}>
         <p className="text-[10px] uppercase font-bold tracking-widest font-mono">
-          Powered by Google Gemini • Vector Engine: Gemini Embeddings
+          Aura Study Assistant • Vector Engine Active
         </p>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-[10px] text-green-500 font-bold uppercase tracking-widest font-mono">Gemini API Active</span>
+            <span className="text-[10px] text-green-500 font-bold uppercase tracking-widest font-mono">System Active</span>
           </div>
         </div>
       </footer>
