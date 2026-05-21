@@ -1,0 +1,10 @@
+{
+  "name": "Accessible Study Material Assistant",
+  "description": "An accessible AI study assistant for visually impaired students using RAG and voice interaction.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
